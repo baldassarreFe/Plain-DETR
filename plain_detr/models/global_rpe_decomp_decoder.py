@@ -7,6 +7,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.checkpoint as checkpoint
 from timm.layers import trunc_normal_
 
@@ -109,19 +110,20 @@ class GlobalCrossAttention(nn.Module):
         v = self.v(v_input_flatten).reshape(B_, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
         B_, N, C = query.shape
         q = self.q(query).reshape(B_, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
-        q = q * self.scale
 
-        attn = q @ k.transpose(-2, -1)
-        attn += rpe
+        # Combine RPE bias and padding mask into a single additive attention mask
+        attn_mask = rpe
         if input_padding_mask is not None:
-            attn += input_padding_mask[:, None, None] * -100
+            attn_mask = attn_mask.masked_fill(input_padding_mask[:, None, None], float("-inf"))
 
-        fmin, fmax = torch.finfo(attn.dtype).min, torch.finfo(attn.dtype).max
-        torch.clip_(attn, min=fmin, max=fmax)
-
-        attn = self.softmax(attn)
-        attn = self.attn_drop(attn)
-        x = attn @ v
+        x = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            attn_mask=attn_mask,
+            dropout_p=self.attn_drop.p if self.training else 0.0,
+            scale=self.scale,
+        )
 
         x = x.transpose(1, 2).reshape(B_, N, C)
         x = self.proj(x)
