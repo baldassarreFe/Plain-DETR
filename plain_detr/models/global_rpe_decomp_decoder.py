@@ -67,7 +67,8 @@ class GlobalCrossAttention(nn.Module):
         input_padding_mask=None,
     ):
         assert input_spatial_shapes.size(0) == 1, "This is designed for single-scale decoder."
-        h, w = input_spatial_shapes[0]
+        device = input_spatial_shapes.device
+        h, w = int(input_spatial_shapes[0, 0]), int(input_spatial_shapes[0, 1])
         stride = self.feature_stride
 
         ref_pts = torch.cat(
@@ -81,10 +82,10 @@ class GlobalCrossAttention(nn.Module):
             ref_pts[..., 0::2] *= w * stride
             ref_pts[..., 1::2] *= h * stride
         pos_x = (
-            torch.linspace(0.5, w - 0.5, w, dtype=torch.float32, device=w.device)[None, None, :, None] * stride
+            torch.linspace(0.5, w - 0.5, w, dtype=torch.float32, device=device)[None, None, :, None] * stride
         )  # 1, 1, w, 1
         pos_y = (
-            torch.linspace(0.5, h - 0.5, h, dtype=torch.float32, device=h.device)[None, None, :, None] * stride
+            torch.linspace(0.5, h - 0.5, h, dtype=torch.float32, device=device)[None, None, :, None] * stride
         )  # 1, 1, h, 1
 
         if self.rpe_type == "abs_log8":
