@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Models
+pt_models/
+
 # Outputs
 output/
 exps/
