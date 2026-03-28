@@ -8,3 +8,11 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Outputs
+output/
+exps/
+
+# Scratch files
+scratch/
+scratch*
