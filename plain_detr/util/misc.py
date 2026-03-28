@@ -511,6 +511,48 @@ def get_swin_layer_id(var_name: str, backbone_type: str) -> int:
     return num_max_layer + 1 - layer_id
 
 
+def get_dinov3_layer_id(var_name: str, backbone_type: str) -> int:
+    """Return a *reverse* layer ID for DINOv3 ViT params (deeper → smaller ID → higher LR).
+
+    DINOv3 ViT is a flat stack of transformer blocks — no hierarchical stages.  The
+    naming inside Plain-DETR is ``backbone.0.body.model.<param>``.
+
+    Layer ID assignment (forward order, 0-indexed):
+      - ``patch_embed.*``, ``cls_token``, ``reg_token`` → 0
+      - ``blocks.{i}.*``                                → i + 1
+      - ``norm.*`` (final norm)                         → depth + 1
+      - anything else                                   → depth + 1  (full LR)
+
+    Returned value is ``depth + 1 - forward_id`` so that the deepest layers get the
+    smallest reverse ID (= highest learning rate under exponential decay).
+    """
+    from plain_detr.models.backbone import DINOV3_VARIANTS
+
+    _, _, depth = DINOV3_VARIANTS[backbone_type]
+    num_max_layer = depth  # forward IDs go from 0 to depth+1
+
+    # Strip the outer prefix to get the timm-internal parameter name.
+    prefix = "backbone.0.body.model."
+    if var_name.startswith(prefix):
+        inner = var_name[len(prefix) :]
+    else:
+        # Fallback: parameter is outside the backbone (e.g. position encoding) → full LR.
+        return 0
+
+    if inner.startswith("patch_embed") or inner in ("cls_token", "reg_token"):
+        layer_id = 0
+    elif inner.startswith("blocks."):
+        # inner looks like "blocks.3.norm1.weight" → block index is the second part
+        block_idx = int(inner.split(".")[1])
+        layer_id = block_idx + 1
+    elif inner.startswith("norm"):
+        layer_id = num_max_layer + 1
+    else:
+        layer_id = num_max_layer + 1
+
+    return num_max_layer + 1 - layer_id
+
+
 def get_param_groups(model: nn.Module, args: Config) -> list[dict[str, Any]]:
     # sanity check: a variable could not match backbone_names and linear_proj_names at the same time
     for n, p in model.named_parameters():
@@ -537,8 +579,10 @@ def _get_param_groups_layerwise_decay(model: nn.Module, args: Config) -> list[di
                 weight_decay = args.weight_decay
             if "swin" in args.backbone:
                 layer_id = get_swin_layer_id(n, args.backbone)
+            elif "dinov3" in args.backbone:
+                layer_id = get_dinov3_layer_id(n, args.backbone)
             else:
-                raise NotImplementedError
+                raise NotImplementedError(f"Layerwise decay not implemented for backbone {args.backbone!r}")
             group_name = f"layer_{layer_id}_{group_name}"
 
             if group_name not in parameter_groups:

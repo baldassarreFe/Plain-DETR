@@ -145,18 +145,26 @@ class Config(BaseModel):
     decoder_rpe_type: str = "linear"
     """Decoder RPE type."""
     wd_norm_names: list[str] = [
-        "norm",
-        "bias",
-        "rpb_mlp",
-        "cpb_mlp",
-        "logit_scale",
-        "relative_position_bias_table",
-        "level_embed",
-        "reference_points",
-        "sampling_offsets",
-        "rel_pos",
+        # -- Shared (both Swin and DINOv3) --
+        "norm",  # LayerNorm / RMSNorm in any backbone or decoder
+        "bias",  # all bias terms
+        # -- Swin-specific --
+        "rpb_mlp",  # relative position bias MLP
+        "cpb_mlp",  # continuous position bias MLP
+        "logit_scale",  # per-head log scale in SwinV2 attention
+        "relative_position_bias_table",  # learned relative position bias table
+        # -- DINOv3-specific --
+        "gamma_1",  # LayerScale parameter (post self-attention)
+        "gamma_2",  # LayerScale parameter (post FFN)
+        "cls_token",  # class token embedding
+        "reg_token",  # register token embedding
+        # -- Decoder / head --
+        "level_embed",  # multi-scale level embedding
+        "reference_points",  # reference point projection
+        "sampling_offsets",  # deformable attention sampling offsets
+        "rel_pos",  # decoder relative position parameters
     ]
-    """Parameter names for weight decay normalization."""
+    """Parameter names that receive reduced weight decay (wd_norm_mult)."""
     wd_norm_mult: NonNegativeFloat = 1.0
     """Weight decay multiplier for norm parameters."""
     use_layerwise_decay: bool = False
