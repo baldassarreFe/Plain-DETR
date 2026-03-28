@@ -286,7 +286,7 @@ def main(args: Config):
 
     if utils.is_main_process():
         with open(args.output_dir / "args.json", "w") as f:
-            json.dump(args.model_dump_json(), f, indent=2)
+            f.write(args.model_dump_json(indent=2))
 
     # fix the seed for reproducibility
     seed = args.seed + utils.get_rank()
