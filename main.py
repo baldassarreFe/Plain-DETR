@@ -322,7 +322,7 @@ def main(args):
 
     amp_dtype = {"fp32": None, "fp16": torch.float16, "bf16": torch.bfloat16}[args.amp_dtype]
     # Only fp16 needs gradient scaling; bf16 has the same dynamic range as fp32
-    scaler = torch.amp.GradScaler("cuda") if amp_dtype == torch.float16 else None
+    scaler = torch.amp.GradScaler("cuda", enabled=amp_dtype == torch.float16)
 
     dataset_train = build_dataset(image_set="train", args=args)
     dataset_val = build_dataset(image_set="val", args=args)
@@ -451,7 +451,7 @@ def main(args):
             lr_scheduler.step(lr_scheduler.last_epoch)
             args.start_epoch = checkpoint["epoch"] + 1
 
-            if scaler is not None and "scaler" in checkpoint:
+            if "scaler" in checkpoint:
                 scaler.load_state_dict(checkpoint["scaler"])
         # check the resumed model
         if not args.eval:
@@ -518,17 +518,15 @@ def main(args):
             # extra checkpoint before LR drop and every 5 epochs
             checkpoint_paths.append(output_dir / f"checkpoint{epoch:04}.pth")
             for checkpoint_path in checkpoint_paths:
-                save_dict = {
-                    "model": model_without_ddp.state_dict(),
-                    "optimizer": optimizer.state_dict(),
-                    "lr_scheduler": lr_scheduler.state_dict(),
-                    "epoch": epoch,
-                    "args": args,
-                }
-                if scaler is not None:
-                    save_dict["scaler"] = scaler.state_dict()
                 utils.save_on_master(
-                    save_dict,
+                    {
+                        "model": model_without_ddp.state_dict(),
+                        "optimizer": optimizer.state_dict(),
+                        "lr_scheduler": lr_scheduler.state_dict(),
+                        "scaler": scaler.state_dict(),
+                        "epoch": epoch,
+                        "args": args,
+                    },
                     checkpoint_path,
                 )
 

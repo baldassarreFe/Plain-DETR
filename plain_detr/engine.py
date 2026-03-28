@@ -79,7 +79,7 @@ def train_one_epoch(
     lambda_one2many: float = 1.0,
     use_wandb: bool = False,
     amp_dtype: torch.dtype | None = None,
-    scaler: torch.amp.GradScaler | None = None,
+    scaler: torch.amp.GradScaler = None,
 ):
     model.train()
     criterion.train()
@@ -119,22 +119,14 @@ def train_one_epoch(
             logger.error(f"{loss_dict_reduced}")
             sys.exit(1)
 
-        if scaler is not None:
-            scaler.scale(losses).backward()
-            scaler.unscale_(optimizer)
-            if max_norm > 0:
-                grad_total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-            else:
-                grad_total_norm = utils.get_total_grad_norm(model.parameters(), norm_type=2)
-            scaler.step(optimizer)
-            scaler.update()
+        scaler.scale(losses).backward()
+        scaler.unscale_(optimizer)
+        if max_norm > 0:
+            grad_total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
         else:
-            losses.backward()
-            if max_norm > 0:
-                grad_total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-            else:
-                grad_total_norm = utils.get_total_grad_norm(model.parameters(), norm_type=2)
-            optimizer.step()
+            grad_total_norm = utils.get_total_grad_norm(model.parameters(), norm_type=2)
+        scaler.step(optimizer)
+        scaler.update()
 
         metric_logger.update(
             loss=loss_value,
