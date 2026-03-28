@@ -479,8 +479,8 @@ def main(args):
             use_wandb=args.use_wandb,
             reparam=args.reparam,
         )
-        if args.output_dir:
-            utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
+        if args.output_dir and utils.is_main_process():
+            torch.save(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
         if utils.is_main_process():
             areaRngLbl = ["", "50", "75", "s", "m", "l"]
             msg = "copypaste: "
@@ -515,18 +515,18 @@ def main(args):
             checkpoint_paths = [output_dir / "checkpoint.pth"]
             # extra checkpoint before LR drop and every 5 epochs
             checkpoint_paths.append(output_dir / f"checkpoint{epoch:04}.pth")
-            for checkpoint_path in checkpoint_paths:
-                utils.save_on_master(
-                    {
-                        "model": model_without_ddp.state_dict(),
-                        "optimizer": optimizer.state_dict(),
-                        "lr_scheduler": lr_scheduler.state_dict(),
-                        "scaler": scaler.state_dict(),
-                        "epoch": epoch,
-                        "args": args,
-                    },
-                    checkpoint_path,
-                )
+            checkpoint_data = {
+                "model": model_without_ddp.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "lr_scheduler": lr_scheduler.state_dict(),
+                "scaler": scaler.state_dict(),
+                "epoch": epoch,
+                "args": args,
+            }
+            if utils.is_main_process():
+                for checkpoint_path in checkpoint_paths:
+                    torch.save(checkpoint_data, checkpoint_path)
+            del checkpoint_data
 
         test_stats, coco_evaluator = evaluate(
             model,
