@@ -13,10 +13,10 @@
 
 
 import argparse
+import copy
 import datetime
 import json
 import logging
-import os
 import random
 import sys
 import time
@@ -422,7 +422,7 @@ def main(args):
             args.resume = resume_from
         else:
             logger.warning(f"Use autoresume, but can not find checkpoint in {output_dir}")
-    if args.resume and os.path.exists(args.resume):
+    if args.resume and Path(args.resume).exists():
         if args.resume.startswith("https"):
             checkpoint = torch.hub.load_state_dict_from_url(args.resume, map_location="cpu", check_hash=True)
         else:
@@ -433,8 +433,6 @@ def main(args):
         if len(unexpected_keys) > 0:
             logger.warning(f"Unexpected Keys: {unexpected_keys}")
         if not args.eval and "optimizer" in checkpoint and "lr_scheduler" in checkpoint and "epoch" in checkpoint:
-            import copy
-
             p_groups = copy.deepcopy(optimizer.param_groups)
             optimizer.load_state_dict(checkpoint["optimizer"])
             for pg, pg_old in zip(optimizer.param_groups, p_groups):

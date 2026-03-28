@@ -10,7 +10,6 @@ Benchmark inference speed of Deformable DETR.
 
 import argparse
 import logging
-import os
 import time
 from pathlib import Path
 
@@ -63,7 +62,7 @@ def benchmark():
         main_args.coco_panoptic_path = str(Path(main_args.data_dir) / "coco")
     assert 0 <= args.warm_iters < args.num_iters
     assert args.batch_size > 0
-    assert args.resume is None or os.path.exists(args.resume)
+    assert args.resume is None or Path(args.resume).exists()
     dataset = build_dataset("val", main_args)
     model, _, _ = build_model(main_args)
     model.cuda()

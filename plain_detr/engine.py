@@ -17,7 +17,7 @@ Train and eval functions used in main.py
 
 import logging
 import math
-import os
+from pathlib import Path
 import sys
 from typing import Iterable
 
@@ -190,7 +190,7 @@ def evaluate(
         panoptic_evaluator = PanopticEvaluator(
             data_loader.dataset.ann_file,
             data_loader.dataset.ann_folder,
-            output_dir=os.path.join(output_dir, "panoptic_eval"),
+            output_dir=Path(output_dir) / "panoptic_eval",
         )
 
     prefetcher = data_prefetcher(data_loader, device, prefetch=True)

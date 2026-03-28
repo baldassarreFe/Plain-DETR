@@ -24,6 +24,7 @@ import os
 import pickle
 import subprocess
 import time
+from pathlib import Path
 from collections import defaultdict, deque
 from typing import List, Optional
 
@@ -275,7 +276,7 @@ class MetricLogger(object):
 
 
 def get_sha():
-    cwd = os.path.dirname(os.path.abspath(__file__))
+    cwd = Path(__file__).resolve().parent
 
     def _run(command):
         return subprocess.check_output(command, cwd=cwd).decode("ascii").strip()
@@ -489,25 +490,23 @@ def inverse_sigmoid(x, eps=1e-5):
 
 
 def find_latest_checkpoint(path, ext="pth"):
-    import glob
-    import os.path as osp
-
-    if not osp.exists(path):
+    path = Path(path)
+    if not path.exists():
         return None
-    if osp.exists(osp.join(path, f"checkpoint.{ext}")):
-        return osp.join(path, f"checkpoint.{ext}")
+    default = path / f"checkpoint.{ext}"
+    if default.exists():
+        return str(default)
 
-    checkpoints = glob.glob(osp.join(path, f"*.{ext}"))
-    checkpoints = [ckpt for ckpt in checkpoints if osp.basename(ckpt) != "eval.pth"]
+    checkpoints = [ckpt for ckpt in path.glob(f"*.{ext}") if ckpt.name != "eval.pth"]
     if len(checkpoints) == 0:
         return None
     latest = -1
     latest_path = None
     for checkpoint in checkpoints:
-        count = int(osp.basename(checkpoint).lstrip("checkpoint").split(".")[0])
+        count = int(checkpoint.name.lstrip("checkpoint").split(".")[0])
         if count > latest:
             latest = count
-            latest_path = checkpoint
+            latest_path = str(checkpoint)
     return latest_path
 
 

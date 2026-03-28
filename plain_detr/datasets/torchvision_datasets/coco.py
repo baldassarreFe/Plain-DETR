@@ -10,9 +10,8 @@
 Copy-Paste from torchvision, but add utility of caching images on memory
 """
 
-import os
-import os.path
 from io import BytesIO
+from pathlib import Path
 
 import tqdm
 from PIL import Image
@@ -61,16 +60,16 @@ class CocoDetection(VisionDataset):
             if index % self.local_size != self.local_rank:
                 continue
             path = self.coco.loadImgs(img_id)[0]["file_name"]
-            with open(os.path.join(self.root, path), "rb") as f:
+            with open(Path(self.root) / path, "rb") as f:
                 self.cache[path] = f.read()
 
     def get_image(self, path):
         if self.cache_mode:
             if path not in self.cache.keys():
-                with open(os.path.join(self.root, path), "rb") as f:
+                with open(Path(self.root) / path, "rb") as f:
                     self.cache[path] = f.read()
             return Image.open(BytesIO(self.cache[path])).convert("RGB")
-        return Image.open(os.path.join(self.root, path)).convert("RGB")
+        return Image.open(Path(self.root) / path).convert("RGB")
 
     def __getitem__(self, index):
         """
