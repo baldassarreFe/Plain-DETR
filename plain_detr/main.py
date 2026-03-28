@@ -213,7 +213,7 @@ class Config(BaseModel):
     """Device to use for training / testing."""
     seed: NonNegativeInt = 42
     """Random seed."""
-    resume: str = ""
+    resume: Path | None = None
     """Resume from checkpoint."""
     auto_resume: bool = True
     """Automatically resume from latest checkpoint."""
@@ -388,11 +388,8 @@ def main(args: Config):
             args.resume = resume_from
         else:
             logger.warning(f"Use autoresume, but can not find checkpoint in {output_dir}")
-    if args.resume and Path(args.resume).exists():
-        if args.resume.startswith("https"):
-            checkpoint = torch.hub.load_state_dict_from_url(args.resume, map_location="cpu", check_hash=True)
-        else:
-            checkpoint = torch.load(args.resume, map_location="cpu")
+    if args.resume is not None and args.resume.exists():
+        checkpoint = torch.load(args.resume, map_location="cpu")
         missing_keys, unexpected_keys = model_without_ddp.load_state_dict(checkpoint["model"], strict=False)
         if len(missing_keys) > 0:
             logger.warning(f"Missing Keys: {missing_keys}")

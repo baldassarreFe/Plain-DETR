@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import time
-from pathlib import Path
 
 import cyclopts
 import torch
@@ -53,12 +52,12 @@ def measure_average_inference_time(model, inputs, num_iters=100, warm_iters=5):
 def benchmark(bench: BenchmarkConfig, cfg: Config):
     assert 0 <= bench.warm_iters < bench.num_iters
     assert cfg.batch_size > 0
-    assert cfg.resume == "" or Path(cfg.resume).exists()
+    assert cfg.resume is None or cfg.resume.exists()
     dataset = build_dataset("val", cfg)
     model, _, _ = build_model(cfg)
     model.cuda()
     model.eval()
-    if cfg.resume:
+    if cfg.resume is not None:
         ckpt = torch.load(cfg.resume, map_location=lambda storage, loc: storage)
         model.load_state_dict(ckpt["model"])
     inputs = nested_tensor_from_tensor_list([dataset.__getitem__(0)[0].cuda() for _ in range(cfg.batch_size)])

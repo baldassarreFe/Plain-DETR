@@ -495,7 +495,7 @@ def find_latest_checkpoint(path, ext="pth"):
         return None
     default = path / f"checkpoint.{ext}"
     if default.exists():
-        return str(default)
+        return default
 
     checkpoints = [ckpt for ckpt in path.glob(f"*.{ext}") if ckpt.name != "eval.pth"]
     if len(checkpoints) == 0:
@@ -506,7 +506,7 @@ def find_latest_checkpoint(path, ext="pth"):
         count = int(checkpoint.name.lstrip("checkpoint").split(".")[0])
         if count > latest:
             latest = count
-            latest_path = str(checkpoint)
+            latest_path = checkpoint
     return latest_path
 
 
