@@ -30,6 +30,215 @@ if TYPE_CHECKING:
 # Panoptic COCO uses category ids up to 200 (80 thing + 53 stuff + gaps).
 NUM_CLASSES = 250
 
+# COCO panoptic category names, indexed by label id (0-249).
+# IDs 1-90 are the 80 "thing" categories (same as COCO detection).
+# IDs 92-200 are the 53 "stuff" categories.
+# All other indices are unused ("N/A").
+# Source: https://github.com/cocodataset/panopticapi (panoptic_coco_categories.json)
+CATEGORY_NAMES: list[str] = [
+    "N/A",  # 0
+    "person",  # 1
+    "bicycle",  # 2
+    "car",  # 3
+    "motorcycle",  # 4
+    "airplane",  # 5
+    "bus",  # 6
+    "train",  # 7
+    "truck",  # 8
+    "boat",  # 9
+    "traffic light",  # 10
+    "fire hydrant",  # 11
+    "N/A",  # 12
+    "stop sign",  # 13
+    "parking meter",  # 14
+    "bench",  # 15
+    "bird",  # 16
+    "cat",  # 17
+    "dog",  # 18
+    "horse",  # 19
+    "sheep",  # 20
+    "cow",  # 21
+    "elephant",  # 22
+    "bear",  # 23
+    "zebra",  # 24
+    "giraffe",  # 25
+    "N/A",  # 26
+    "backpack",  # 27
+    "umbrella",  # 28
+    "N/A",  # 29
+    "N/A",  # 30
+    "handbag",  # 31
+    "tie",  # 32
+    "suitcase",  # 33
+    "frisbee",  # 34
+    "skis",  # 35
+    "snowboard",  # 36
+    "sports ball",  # 37
+    "kite",  # 38
+    "baseball bat",  # 39
+    "baseball glove",  # 40
+    "skateboard",  # 41
+    "surfboard",  # 42
+    "tennis racket",  # 43
+    "bottle",  # 44
+    "N/A",  # 45
+    "wine glass",  # 46
+    "cup",  # 47
+    "fork",  # 48
+    "knife",  # 49
+    "spoon",  # 50
+    "bowl",  # 51
+    "banana",  # 52
+    "apple",  # 53
+    "sandwich",  # 54
+    "orange",  # 55
+    "broccoli",  # 56
+    "carrot",  # 57
+    "hot dog",  # 58
+    "pizza",  # 59
+    "donut",  # 60
+    "cake",  # 61
+    "chair",  # 62
+    "couch",  # 63
+    "potted plant",  # 64
+    "bed",  # 65
+    "N/A",  # 66
+    "dining table",  # 67
+    "N/A",  # 68
+    "N/A",  # 69
+    "toilet",  # 70
+    "N/A",  # 71
+    "tv",  # 72
+    "laptop",  # 73
+    "mouse",  # 74
+    "remote",  # 75
+    "keyboard",  # 76
+    "cell phone",  # 77
+    "microwave",  # 78
+    "oven",  # 79
+    "toaster",  # 80
+    "sink",  # 81
+    "refrigerator",  # 82
+    "N/A",  # 83
+    "book",  # 84
+    "clock",  # 85
+    "vase",  # 86
+    "scissors",  # 87
+    "teddy bear",  # 88
+    "hair drier",  # 89
+    "toothbrush",  # 90
+    "N/A",  # 91
+    "banner",  # 92
+    "blanket",  # 93
+    "N/A",  # 94
+    "bridge",  # 95
+    "N/A",  # 96
+    "N/A",  # 97
+    "N/A",  # 98
+    "N/A",  # 99
+    "cardboard",  # 100
+    "N/A",  # 101
+    "N/A",  # 102
+    "N/A",  # 103
+    "N/A",  # 104
+    "N/A",  # 105
+    "N/A",  # 106
+    "counter",  # 107
+    "N/A",  # 108
+    "curtain",  # 109
+    "N/A",  # 110
+    "N/A",  # 111
+    "door-stuff",  # 112
+    "N/A",  # 113
+    "N/A",  # 114
+    "N/A",  # 115
+    "N/A",  # 116
+    "N/A",  # 117
+    "floor-wood",  # 118
+    "flower",  # 119
+    "N/A",  # 120
+    "N/A",  # 121
+    "fruit",  # 122
+    "N/A",  # 123
+    "N/A",  # 124
+    "gravel",  # 125
+    "N/A",  # 126
+    "N/A",  # 127
+    "house",  # 128
+    "N/A",  # 129
+    "light",  # 130
+    "N/A",  # 131
+    "N/A",  # 132
+    "mirror-stuff",  # 133
+    "N/A",  # 134
+    "N/A",  # 135
+    "N/A",  # 136
+    "N/A",  # 137
+    "net",  # 138
+    "N/A",  # 139
+    "N/A",  # 140
+    "pillow",  # 141
+    "N/A",  # 142
+    "N/A",  # 143
+    "platform",  # 144
+    "playingfield",  # 145
+    "N/A",  # 146
+    "railroad",  # 147
+    "river",  # 148
+    "road",  # 149
+    "N/A",  # 150
+    "roof",  # 151
+    "N/A",  # 152
+    "N/A",  # 153
+    "sand",  # 154
+    "sea",  # 155
+    "shelf",  # 156
+    "N/A",  # 157
+    "N/A",  # 158
+    "snow",  # 159
+    "N/A",  # 160
+    "stairs",  # 161
+    "N/A",  # 162
+    "N/A",  # 163
+    "N/A",  # 164
+    "N/A",  # 165
+    "tent",  # 166
+    "N/A",  # 167
+    "towel",  # 168
+    "N/A",  # 169
+    "N/A",  # 170
+    "wall-brick",  # 171
+    "N/A",  # 172
+    "N/A",  # 173
+    "N/A",  # 174
+    "wall-stone",  # 175
+    "wall-tile",  # 176
+    "wall-wood",  # 177
+    "water-other",  # 178
+    "N/A",  # 179
+    "window-blind",  # 180
+    "window-other",  # 181
+    "N/A",  # 182
+    "N/A",  # 183
+    "tree-merged",  # 184
+    "fence-merged",  # 185
+    "ceiling-merged",  # 186
+    "sky-other-merged",  # 187
+    "cabinet-merged",  # 188
+    "table-merged",  # 189
+    "floor-other-merged",  # 190
+    "pavement-merged",  # 191
+    "mountain-merged",  # 192
+    "grass-merged",  # 193
+    "dirt-merged",  # 194
+    "paper-merged",  # 195
+    "food-other-merged",  # 196
+    "building-other-merged",  # 197
+    "rock-merged",  # 198
+    "wall-other-merged",  # 199
+    "rug-merged",  # 200
+] + ["N/A"] * 49  # 201-249 are unused
+
 
 class CocoPanoptic(Dataset):
     def __init__(

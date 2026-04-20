@@ -31,6 +31,18 @@ def get_num_classes(dataset_name: str) -> int:
     return lookup[dataset_name]
 
 
+def get_category_names(dataset_name: str) -> list[str]:
+    """Return human-readable category names for a dataset, indexed by label id."""
+    lookup: dict[str, list[str]] = {
+        "coco": coco.CATEGORY_NAMES,
+        "coco_panoptic": coco_panoptic.CATEGORY_NAMES,
+        "zod": zod.CATEGORY_NAMES,
+    }
+    if dataset_name not in lookup:
+        raise ValueError(f"unknown dataset_name {dataset_name!r}")
+    return lookup[dataset_name]
+
+
 def build_dataset(image_set: str, args: Config) -> tuple[torch.utils.data.Dataset, int]:
     """Build a dataset and return ``(dataset, num_classes)``."""
     # coco and coco_panoptic share the same root directory.

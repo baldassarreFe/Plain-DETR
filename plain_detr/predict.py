@@ -29,7 +29,7 @@ import PIL.ImageFont
 import torch
 import torchvision.transforms.functional as F
 
-from plain_detr.datasets import get_num_classes
+from plain_detr.datasets import get_category_names, get_num_classes
 from plain_detr.models.detr import PostProcess
 from plain_detr.models.detr import build as build_model
 from plain_detr.util.misc import nested_tensor_from_tensor_list
@@ -38,103 +38,6 @@ if TYPE_CHECKING:
     from plain_detr.main import Config
 
 logger = logging.getLogger(__name__)
-
-# COCO 2017 category names, indexed by *label id* (0-90).
-# Index 0 is the background class used internally by the model; the 80 actual
-# object categories occupy a sparse subset of indices 1-90.
-COCO_CATEGORIES: list[str] = [
-    "N/A",  # 0  - background / unused
-    "person",  # 1
-    "bicycle",  # 2
-    "car",  # 3
-    "motorcycle",  # 4
-    "airplane",  # 5
-    "bus",  # 6
-    "train",  # 7
-    "truck",  # 8
-    "boat",  # 9
-    "traffic light",  # 10
-    "fire hydrant",  # 11
-    "N/A",  # 12
-    "stop sign",  # 13
-    "parking meter",  # 14
-    "bench",  # 15
-    "bird",  # 16
-    "cat",  # 17
-    "dog",  # 18
-    "horse",  # 19
-    "sheep",  # 20
-    "cow",  # 21
-    "elephant",  # 22
-    "bear",  # 23
-    "zebra",  # 24
-    "giraffe",  # 25
-    "N/A",  # 26
-    "backpack",  # 27
-    "umbrella",  # 28
-    "N/A",  # 29
-    "N/A",  # 30
-    "handbag",  # 31
-    "tie",  # 32
-    "suitcase",  # 33
-    "frisbee",  # 34
-    "skis",  # 35
-    "snowboard",  # 36
-    "sports ball",  # 37
-    "kite",  # 38
-    "baseball bat",  # 39
-    "baseball glove",  # 40
-    "skateboard",  # 41
-    "surfboard",  # 42
-    "tennis racket",  # 43
-    "bottle",  # 44
-    "N/A",  # 45
-    "wine glass",  # 46
-    "cup",  # 47
-    "fork",  # 48
-    "knife",  # 49
-    "spoon",  # 50
-    "bowl",  # 51
-    "banana",  # 52
-    "apple",  # 53
-    "sandwich",  # 54
-    "orange",  # 55
-    "broccoli",  # 56
-    "carrot",  # 57
-    "hot dog",  # 58
-    "pizza",  # 59
-    "donut",  # 60
-    "cake",  # 61
-    "chair",  # 62
-    "couch",  # 63
-    "potted plant",  # 64
-    "bed",  # 65
-    "N/A",  # 66
-    "dining table",  # 67
-    "N/A",  # 68
-    "N/A",  # 69
-    "toilet",  # 70
-    "N/A",  # 71
-    "tv",  # 72
-    "laptop",  # 73
-    "mouse",  # 74
-    "remote",  # 75
-    "keyboard",  # 76
-    "cell phone",  # 77
-    "microwave",  # 78
-    "oven",  # 79
-    "toaster",  # 80
-    "sink",  # 81
-    "refrigerator",  # 82
-    "N/A",  # 83
-    "book",  # 84
-    "clock",  # 85
-    "vase",  # 86
-    "scissors",  # 87
-    "teddy bear",  # 88
-    "hair drier",  # 89
-    "toothbrush",  # 90
-]
 
 # Distinct colours for up to 20 categories, then cycling.
 _PALETTE: list[str] = [
@@ -246,7 +149,7 @@ def draw_predictions(
     scores: torch.Tensor,
     labels: torch.Tensor,
     boxes: torch.Tensor,
-    category_names: list[str] = COCO_CATEGORIES,
+    category_names: list[str],
 ) -> PIL.Image.Image:
     """Draw bounding boxes, labels, and scores on *image* (modified in place and returned).
 
@@ -418,6 +321,7 @@ def main(
         raise ValueError("No images provided")
 
     model, postprocess, config = load_model(checkpoint, topk=topk)
+    category_names = get_category_names(config.dataset_name)
 
     for image_path in image_paths:
         if not image_path.exists():
@@ -435,10 +339,10 @@ def main(
 
         logger.info(f"  {len(scores)} detections above threshold {threshold}")
         for score, label, box in zip(scores.tolist(), labels.tolist(), boxes.tolist()):
-            name = COCO_CATEGORIES[label] if label < len(COCO_CATEGORIES) else f"class_{label}"
+            name = category_names[label] if label < len(category_names) else f"class_{label}"
             logger.info(f"    {name}: {score:.3f}  box={[f'{c:.1f}' for c in box]}")
 
-        annotated = draw_predictions(pil_image, scores, labels, boxes)
+        annotated = draw_predictions(pil_image, scores, labels, boxes, category_names)
         out_path = prediction_output_path(image_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         annotated.save(out_path)
