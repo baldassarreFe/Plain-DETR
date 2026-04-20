@@ -19,6 +19,18 @@ if TYPE_CHECKING:
     from plain_detr.main import Config
 
 
+def get_num_classes(dataset_name: str) -> int:
+    """Return the number of classes for a dataset (max category id + 1)."""
+    lookup = {
+        "coco": coco.NUM_CLASSES,
+        "coco_panoptic": coco_panoptic.NUM_CLASSES,
+        "zod": zod.NUM_CLASSES,
+    }
+    if dataset_name not in lookup:
+        raise ValueError(f"unknown dataset_name {dataset_name!r}")
+    return lookup[dataset_name]
+
+
 def build_dataset(image_set: str, args: Config) -> tuple[torch.utils.data.Dataset, int]:
     """Build a dataset and return ``(dataset, num_classes)``."""
     # coco and coco_panoptic share the same root directory.
