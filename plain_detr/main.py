@@ -35,7 +35,7 @@ from torch.utils.data import DataLoader
 import plain_detr.datasets as datasets
 import plain_detr.datasets.samplers as samplers
 import plain_detr.util.misc as utils
-from plain_detr.datasets import build_dataset, get_coco_api_from_dataset
+from plain_detr.datasets import build_dataset
 from plain_detr.engine import evaluate, train_one_epoch
 from plain_detr.models.detr import build as build_model
 
@@ -205,12 +205,9 @@ class Config(BaseModel):
     # -- Dataset -----------------------------------------------------------------
     data_dir: Path = Path("data")
     """Root directory for datasets."""
-    dataset_file: str = "coco"
-    """Dataset name."""
-    coco_path: Path = Path("coco")
-    """Path to COCO dataset, absolute or relative to data_dir."""
-    coco_panoptic_path: Path = Path("coco")
-    """Path to COCO panoptic annotations, absolute or relative to data_dir."""
+    dataset_name: str = "coco"
+    """Dataset name: 'coco', 'coco_panoptic', or 'zod'."""
+
     remove_difficult: bool = False
     """Remove difficult examples."""
 
@@ -297,7 +294,13 @@ def main(args: Config):
     random.seed(seed)
     torch.backends.cudnn.benchmark = True
 
-    model, criterion, postprocessors = build_model(args)
+    # Datasets
+    dataset_train, num_classes = build_dataset(image_set="train", args=args)
+    dataset_val, _ = build_dataset(image_set="val", args=args)
+    logger.info(f"Training dataset size: {len(dataset_train)}")
+    logger.info(f"Validation dataset size: {len(dataset_val)}")
+
+    model, criterion, postprocessors = build_model(args, num_classes)
     model.to(device)
     logger.info(f"Model:\n{model}")
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -307,12 +310,6 @@ def main(args: Config):
     amp_dtype = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}[args.amp_dtype]
     scaler = torch.amp.GradScaler("cuda", enabled=amp_dtype == torch.float16)
     logger.info(f"AMP dtype: {amp_dtype}, GradScaler enabled: {scaler.is_enabled()}")
-
-    # Datasets
-    dataset_train = build_dataset(image_set="train", args=args)
-    dataset_val = build_dataset(image_set="val", args=args)
-    logger.info(f"Training dataset size: {len(dataset_train)}")
-    logger.info(f"Validation dataset size: {len(dataset_val)}")
 
     # DataLoaders
     if args.distributed:
@@ -374,12 +371,13 @@ def main(args: Config):
     else:
         model_without_ddp = model
 
-    if args.dataset_file == "coco_panoptic":
+    if args.dataset_name == "coco_panoptic":
         # We also evaluate AP during panoptic training, on original coco DS
-        coco_val = datasets.coco.build("val", args)
-        base_ds = get_coco_api_from_dataset(coco_val)
+        coco_val = datasets.coco.build("val", args, args.data_dir / "coco")
+        base_ds = coco_val.coco
     else:
-        base_ds = get_coco_api_from_dataset(dataset_val)
+        assert isinstance(dataset_val, datasets.coco.CocoDetection), f"Expected CocoDetection, got {type(dataset_val)}"
+        base_ds = dataset_val.coco
 
     if args.frozen_weights is not None:
         checkpoint = torch.load(args.frozen_weights, map_location="cpu", weights_only=False)

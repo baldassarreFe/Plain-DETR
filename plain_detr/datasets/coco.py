@@ -11,61 +11,101 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 # ------------------------------------------------------------------------
 
-"""
-COCO dataset which returns image_id for evaluation.
-
-Mostly copy-paste from https://github.com/pytorch/vision/blob/13b35ff/references/detection/coco_utils.py
-"""
+"""COCO dataset which returns image_id for evaluation."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from io import BytesIO
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
+import PIL.Image
 import torch
-import torch.utils.data
+import tqdm
 from pycocotools import mask as coco_mask
+from pycocotools.coco import COCO
+from torch.utils.data import Dataset
 
 from plain_detr.datasets import transforms as T
 from plain_detr.util.misc import get_local_rank, get_local_size
 
-from .torchvision_datasets import CocoDetection as TvCocoDetection
-
 if TYPE_CHECKING:
+    from PIL.Image import Image as PilImage
+
     from plain_detr.main import Config
 
+# COCO uses non-contiguous category ids with a max of 90, so num_classes = 91.
+NUM_CLASSES = 91
 
-class CocoDetection(TvCocoDetection):
+
+class CocoDetection(Dataset):
+    """COCO detection dataset with optional image caching."""
+
     def __init__(
         self,
-        img_folder,
-        ann_file,
-        transforms,
-        return_seg_masks,
-        cache_mode=False,
-        local_rank=0,
-        local_size=1,
-    ):
-        super(CocoDetection, self).__init__(
-            img_folder,
-            ann_file,
-            cache_mode=cache_mode,
-            local_rank=local_rank,
-            local_size=local_size,
-        )
-        self._transforms = transforms
-        self.prepare = ConvertCocoPolysToSegMask(return_seg_masks)
+        img_folder: str | Path,
+        ann_file: str | Path,
+        transforms: T.Compose,
+        return_seg_masks: bool,
+        cache_mode: bool = False,
+        local_rank: int = 0,
+        local_size: int = 1,
+    ) -> None:
+        self.root = Path(img_folder)
+        self.coco = COCO(ann_file)
+        self.ids = list(sorted(self.coco.imgs.keys()))
+        self.transforms = transforms
+        self.return_seg_masks = return_seg_masks
 
-    def __getitem__(self, idx):
-        img, target = super(CocoDetection, self).__getitem__(idx)
-        image_id = self.ids[idx]
-        target = {"image_id": image_id, "annotations": target}
-        img, target = self.prepare(img, target)
-        if self._transforms is not None:
-            img, target = self._transforms(img, target)
+        self.cache_mode = cache_mode
+        self.local_rank = local_rank
+        self.local_size = local_size
+        self.cache: dict[str, bytes] = {}
+        if cache_mode:
+            self._cache_images()
+
+    # -- Caching ----------------------------------------------------------------
+
+    def _cache_images(self) -> None:
+        """Pre-load image bytes into memory, sharded across local ranks."""
+        self.cache = {}
+        for index, img_id in zip(tqdm.trange(len(self.ids)), self.ids):
+            if index % self.local_size != self.local_rank:
+                continue
+            path = self.coco.loadImgs(img_id)[0]["file_name"]
+            with open(self.root / path, "rb") as f:
+                self.cache[path] = f.read()
+
+    def _load_image(self, path: str) -> PilImage:
+        """Load an image from disk or cache, returning an RGB PIL image."""
+        if self.cache_mode:
+            if path not in self.cache:
+                with open(self.root / path, "rb") as f:
+                    self.cache[path] = f.read()
+            return PIL.Image.open(BytesIO(self.cache[path])).convert("RGB")
+        return PIL.Image.open(self.root / path).convert("RGB")
+
+    # -- Dataset interface ------------------------------------------------------
+
+    def __len__(self) -> int:
+        return len(self.ids)
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict[str, Any]]:
+        img_id = self.ids[idx]
+        ann_ids = self.coco.getAnnIds(imgIds=img_id)
+        target = self.coco.loadAnns(ann_ids)
+
+        path = self.coco.loadImgs(img_id)[0]["file_name"]
+        img = self._load_image(path)
+        w, h = img.size
+
+        target = prepare_coco_target(img_id, target, h, w, self.return_seg_masks)
+        img, target = self.transforms(img, target)
         return img, target
 
 
-def convert_coco_poly_to_seg_mask(segmentations, height, width):
+def _convert_polys_to_seg_mask(segmentations: list, height: int, width: int) -> torch.Tensor:
+    """Decode COCO polygon segmentations into a ``(N, H, W)`` binary mask tensor."""
     masks = []
     for polygons in segmentations:
         rles = coco_mask.frPyObjects(polygons, height, width)
@@ -82,72 +122,72 @@ def convert_coco_poly_to_seg_mask(segmentations, height, width):
     return masks
 
 
-class ConvertCocoPolysToSegMask(object):
-    def __init__(self, return_seg_masks=False):
-        self.return_seg_masks = return_seg_masks
+def prepare_coco_target(
+    image_id: int,
+    annotations: list[dict[str, Any]],
+    image_height: int,
+    image_width: int,
+    return_seg_masks: bool,
+) -> dict[str, Any]:
+    """Convert raw COCO annotations into a training-ready target dict.
 
-    def __call__(self, image, target):
-        w, h = image.size
+    Filters crowd annotations, converts ``[x, y, w, h]`` boxes to
+    ``[x1, y1, x2, y2]``, clamps to image bounds, removes degenerate boxes,
+    and optionally decodes polygon segmentations into binary masks.
+    """
+    anno = [obj for obj in annotations if "iscrowd" not in obj or obj["iscrowd"] == 0]
 
-        image_id = target["image_id"]
-        image_id = torch.tensor([image_id])
+    boxes = [obj["bbox"] for obj in anno]
+    # guard against no boxes via resizing
+    boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
+    boxes[:, 2:] += boxes[:, :2]
+    boxes[:, 0::2].clamp_(min=0, max=image_width)
+    boxes[:, 1::2].clamp_(min=0, max=image_height)
 
-        anno = target["annotations"]
+    classes = torch.tensor([obj["category_id"] for obj in anno], dtype=torch.int64)
 
-        anno = [obj for obj in anno if "iscrowd" not in obj or obj["iscrowd"] == 0]
+    if return_seg_masks:
+        segmentations = [obj["segmentation"] for obj in anno]
+        masks = _convert_polys_to_seg_mask(segmentations, image_height, image_width)
 
-        boxes = [obj["bbox"] for obj in anno]
-        # guard against no boxes via resizing
-        boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
-        boxes[:, 2:] += boxes[:, :2]
-        boxes[:, 0::2].clamp_(min=0, max=w)
-        boxes[:, 1::2].clamp_(min=0, max=h)
+    keypoints = None
+    if anno and "keypoints" in anno[0]:
+        keypoints = torch.as_tensor([obj["keypoints"] for obj in anno], dtype=torch.float32)
+        num_keypoints = keypoints.shape[0]
+        if num_keypoints:
+            keypoints = keypoints.view(num_keypoints, -1, 3)
 
-        classes = [obj["category_id"] for obj in anno]
-        classes = torch.tensor(classes, dtype=torch.int64)
+    keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
+    boxes = boxes[keep]
+    classes = classes[keep]
+    if return_seg_masks:
+        masks = masks[keep]
+    if keypoints is not None:
+        keypoints = keypoints[keep]
 
-        if self.return_seg_masks:
-            segmentations = [obj["segmentation"] for obj in anno]
-            masks = convert_coco_poly_to_seg_mask(segmentations, h, w)
+    target: dict[str, Any] = {
+        "boxes": boxes,
+        "labels": classes,
+        "image_id": torch.tensor([image_id]),
+        "orig_size": torch.as_tensor([image_height, image_width]),
+        "size": torch.as_tensor([image_height, image_width]),
+    }
+    if return_seg_masks:
+        target["seg_masks"] = masks
+    if keypoints is not None:
+        target["keypoints"] = keypoints
 
-        keypoints = None
-        if anno and "keypoints" in anno[0]:
-            keypoints = [obj["keypoints"] for obj in anno]
-            keypoints = torch.as_tensor(keypoints, dtype=torch.float32)
-            num_keypoints = keypoints.shape[0]
-            if num_keypoints:
-                keypoints = keypoints.view(num_keypoints, -1, 3)
+    # for conversion to coco api
+    area = torch.tensor([obj["area"] for obj in anno])
+    iscrowd = torch.tensor([obj["iscrowd"] if "iscrowd" in obj else 0 for obj in anno])
+    target["area"] = area[keep]
+    target["iscrowd"] = iscrowd[keep]
 
-        keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
-        boxes = boxes[keep]
-        classes = classes[keep]
-        if self.return_seg_masks:
-            masks = masks[keep]
-        if keypoints is not None:
-            keypoints = keypoints[keep]
-
-        target = {}
-        target["boxes"] = boxes
-        target["labels"] = classes
-        if self.return_seg_masks:
-            target["seg_masks"] = masks
-        target["image_id"] = image_id
-        if keypoints is not None:
-            target["keypoints"] = keypoints
-
-        # for conversion to coco api
-        area = torch.tensor([obj["area"] for obj in anno])
-        iscrowd = torch.tensor([obj["iscrowd"] if "iscrowd" in obj else 0 for obj in anno])
-        target["area"] = area[keep]
-        target["iscrowd"] = iscrowd[keep]
-
-        target["orig_size"] = torch.as_tensor([int(h), int(w)])
-        target["size"] = torch.as_tensor([int(h), int(w)])
-
-        return image, target
+    return target
 
 
-def make_coco_transforms(image_set, args: Config):
+def make_coco_transforms(image_set: str, args: Config) -> T.Compose:
+    """Build the train or val augmentation pipeline (resize, crop, flip, normalize)."""
     normalize = T.Compose(
         [
             T.ToTensor(),
@@ -155,9 +195,8 @@ def make_coco_transforms(image_set, args: Config):
         ]
     )
 
-    scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
-
     if image_set == "train":
+        scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
         return T.Compose(
             [
                 T.RandomHorizontalFlip(),
@@ -175,6 +214,7 @@ def make_coco_transforms(image_set, args: Config):
             ]
         )
 
+    # Single scale, no randomness
     if image_set == "val":
         return T.Compose(
             [
@@ -186,17 +226,17 @@ def make_coco_transforms(image_set, args: Config):
     raise ValueError(f"unknown {image_set}")
 
 
-def build(image_set, args: Config):
-    root = args.data_dir / args.coco_path
-    assert root.exists(), f"provided COCO path {root} does not exist"
-    mode = "instances"
-    PATHS = {
-        "train": (root / "train2017", root / "annotations" / f"{mode}_train2017.json"),
-        "val": (root / "val2017", root / "annotations" / f"{mode}_val2017.json"),
-    }
-
-    img_folder, ann_file = PATHS[image_set]
-    dataset = CocoDetection(
+def build(image_set: str, args: Config, root: Path) -> CocoDetection:
+    """Construct a :class:`CocoDetection` for the given split (``'train'`` or ``'val'``)."""
+    if image_set == "train":
+        img_folder = root / "train2017"
+        ann_file = root / "annotations" / "instances_train2017.json"
+    elif image_set == "val":
+        img_folder = root / "val2017"
+        ann_file = root / "annotations" / "instances_val2017.json"
+    else:
+        raise ValueError(f"unknown image set {image_set!r}")
+    return CocoDetection(
         img_folder,
         ann_file,
         transforms=make_coco_transforms(image_set, args),
@@ -205,4 +245,3 @@ def build(image_set, args: Config):
         local_rank=get_local_rank(),
         local_size=get_local_size(),
     )
-    return dataset
