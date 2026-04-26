@@ -21,6 +21,7 @@ import gc
 import logging
 import math
 import sys
+import time
 from typing import TYPE_CHECKING
 
 import torch
@@ -96,17 +97,26 @@ def train_one_epoch(
     metric_logger.add_meter("grad_norm", utils.SmoothedValue(window_size=1, fmt="{value:.2f}"))
     header = "Epoch: [{}]".format(epoch)
     print_freq = 10
+    logger.info(
+        f"Profiling enabled: logging every {args.profile_freq} iterations."
+        if args.profile_freq > 0
+        else "Profiling disabled."
+    )
 
     prefetcher = data_prefetcher(data_loader, device, prefetch=True)
     samples, targets = prefetcher.next()
 
     # for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
     for idx in metric_logger.log_every(range(len(data_loader)), print_freq, header):
-        optimizer.zero_grad(set_to_none=True)
-
+        is_profiling_iter = args.profile_freq > 0 and idx % args.profile_freq == 0
+        if is_profiling_iter:
+            torch.cuda.synchronize()
+            t_iter_start = t_fwd_start = time.perf_counter()
         with torch.amp.autocast("cuda", dtype=amp_dtype):
             outputs = model(samples)
-
+            if is_profiling_iter:
+                torch.cuda.synchronize()
+                t_loss_start = time.perf_counter()
             if args.k_one2many > 0:
                 loss_dict = train_hybrid(outputs, targets, args.k_one2many, criterion, args.lambda_one2many)
             else:
@@ -126,8 +136,15 @@ def train_one_epoch(
             logger.error(f"{loss_dict_reduced}")
             sys.exit(1)
 
+        if is_profiling_iter:
+            torch.cuda.synchronize()
+            t_bwd_start = time.perf_counter()
         scaler.scale(losses).backward()
         scaler.unscale_(optimizer)
+
+        if is_profiling_iter:
+            torch.cuda.synchronize()
+            t_optim_start = time.perf_counter()
         if args.clip_max_norm > 0:
             grad_total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_max_norm)
         else:
@@ -136,6 +153,7 @@ def train_one_epoch(
             )
         scaler.step(optimizer)
         scaler.update()
+        optimizer.zero_grad(set_to_none=True)
 
         metric_logger.update(
             loss=loss_value,
@@ -145,8 +163,35 @@ def train_one_epoch(
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(grad_norm=grad_total_norm)
 
+        if is_profiling_iter:
+            torch.cuda.synchronize()
+            t_data_start = time.perf_counter()
+            batch_h, batch_w = samples.tensors.shape[2], samples.tensors.shape[3]
+            n_targets = sum(len(t["labels"]) for t in targets)
         samples, targets = prefetcher.next()
         lr_scheduler.step()
+
+        if is_profiling_iter:
+            torch.cuda.synchronize()
+            t_iter_end = time.perf_counter()
+            _ms = 1000.0
+            fwd_ms = (t_loss_start - t_fwd_start) * _ms
+            loss_ms = (t_bwd_start - t_loss_start) * _ms
+            bwd_ms = (t_optim_start - t_bwd_start) * _ms
+            optim_ms = (t_data_start - t_optim_start) * _ms
+            data_ms = (t_iter_end - t_data_start) * _ms
+            total_ms = (t_iter_end - t_iter_start) * _ms
+            mem_alloc_gb = torch.cuda.memory_allocated() / 1024**3
+            mem_reserved_gb = torch.cuda.memory_reserved() / 1024**3
+            mem_peak_gb = torch.cuda.max_memory_allocated() / 1024**3
+            logger.info(
+                f"TRAIN rank={args.rank} iter={idx} "
+                f"fwd={fwd_ms:.0f}ms loss={loss_ms:.0f}ms bwd={bwd_ms:.0f}ms "
+                f"optim={optim_ms:.0f}ms data={data_ms:.0f}ms total={total_ms:.0f}ms "
+                f"mem_alloc={mem_alloc_gb:.1f}GB mem_rsv={mem_reserved_gb:.1f}GB "
+                f"mem_peak={mem_peak_gb:.1f}GB "
+                f"batch_hw={batch_h}x{batch_w} n_targets={n_targets}"
+            )
 
         if args.use_wandb and idx % print_freq == 0 and dist.get_rank() == 0:
             log_data = dict(
@@ -195,6 +240,7 @@ def evaluate(
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter("class_error", utils.SmoothedValue(window_size=1, fmt="{value:.2f}"))
     header = "Test:"
+    print_freq = 10
 
     iou_types = tuple(k for k in ("segm", "bbox") if k in postprocessors.keys())
     coco_evaluator = CocoEvaluator(base_ds, iou_types, max_dets=args.max_dets)
@@ -211,8 +257,16 @@ def evaluate(
     prefetcher = data_prefetcher(data_loader, device, prefetch=True)
     samples, targets = prefetcher.next()
 
-    for _idx in metric_logger.log_every(range(len(data_loader)), 10, header):
+    for idx in metric_logger.log_every(range(len(data_loader)), print_freq, header):
+        is_profiling_iter = args.profile_freq > 0 and idx % args.profile_freq == 0
+        if is_profiling_iter:
+            torch.cuda.synchronize()
+            t_iter_start = t_fwd_start = time.perf_counter()
         outputs = model(samples)
+
+        if is_profiling_iter:
+            torch.cuda.synchronize()
+            t_loss_start = time.perf_counter()
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
 
@@ -225,6 +279,9 @@ def evaluate(
         )
         metric_logger.update(class_error=loss_dict_reduced["class_error"])
 
+        if is_profiling_iter:
+            torch.cuda.synchronize()
+            t_eval_start = time.perf_counter()
         orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
         target_sizes = torch.stack([t["size"] for t in targets], dim=0)
         if args.reparam:
@@ -247,7 +304,28 @@ def evaluate(
 
             panoptic_evaluator.update(res_pano)
 
+        if is_profiling_iter:
+            torch.cuda.synchronize()
+            t_data_start = time.perf_counter()
+            batch_h, batch_w = samples.tensors.shape[2], samples.tensors.shape[3]
         samples, targets = prefetcher.next()
+
+        if is_profiling_iter:
+            torch.cuda.synchronize()
+            t_iter_end = time.perf_counter()
+            _ms = 1000.0
+            fwd_ms = (t_loss_start - t_fwd_start) * _ms
+            post_ms = (t_eval_start - t_loss_start) * _ms
+            eval_ms = (t_data_start - t_eval_start) * _ms
+            data_ms = (t_iter_end - t_data_start) * _ms
+            total_ms = (t_iter_end - t_iter_start) * _ms
+            mem_alloc_gb = torch.cuda.memory_allocated() / 1024**3
+            logger.info(
+                f"EVAL rank={args.rank} iter={idx} "
+                f"fwd={fwd_ms:.0f}ms post={post_ms:.0f}ms eval={eval_ms:.0f}ms "
+                f"data={data_ms:.0f}ms total={total_ms:.0f}ms "
+                f"mem_alloc={mem_alloc_gb:.1f}GB batch_hw={batch_h}x{batch_w}"
+            )
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()

@@ -262,6 +262,10 @@ class Config(BaseModel):
     gc_collect_interval: PositiveInt = 500
     """Run gc.collect() every N training iterations."""
 
+    # -- Profiling ---------------------------------------------------------------
+    profile_freq: NonNegativeInt = 0
+    """Log per-rank timing breakdown every N iterations (0 to disable)."""
+
     # -- Logging -----------------------------------------------------------------
     use_wandb: bool = False
     """Enable Weights & Biases logging."""
