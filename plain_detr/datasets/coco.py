@@ -293,29 +293,25 @@ def make_coco_transforms(image_set: str, args: Config) -> T.Compose:
     )
 
     if image_set == "train":
-        scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
-        return T.Compose(
-            [
-                T.RandomHorizontalFlip(),
-                T.RandomSelect(
-                    T.RandomResize(scales, max_size=1333),
-                    T.Compose(
-                        [
-                            T.RandomResize([400, 500, 600]),
-                            T.RandomSizeCrop(384, 600),
-                            T.RandomResize(scales, max_size=1333),
-                        ]
-                    ),
-                ),
-                normalize,
-            ]
-        )
+        rand_resize = T.RandomResize(args.train_min_sizes, max_size=args.max_size)
+        if args.crop_enabled:
+            rand_crop = T.Compose(
+                [
+                    T.RandomResize(args.crop_scales),
+                    T.RandomSizeCrop(args.crop_min_size, args.crop_max_size),
+                    T.RandomResize(args.train_min_sizes, max_size=args.max_size),
+                ]
+            )
+            augment = T.RandomSelect(rand_resize, rand_crop)
+        else:
+            augment = rand_resize
+        return T.Compose([T.RandomHorizontalFlip(), augment, normalize])
 
     # Single scale, no randomness
     if image_set == "val":
         return T.Compose(
             [
-                T.RandomResize([800], max_size=1333),
+                T.RandomResize([args.val_min_size], max_size=args.max_size),
                 normalize,
             ]
         )

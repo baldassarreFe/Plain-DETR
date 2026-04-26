@@ -229,11 +229,30 @@ class Config(BaseModel):
     cache_mode: bool = False
     """Whether to cache images on memory."""
 
+    # -- Data augmentation - defaults for COCO -----------------------------------
+    max_size: PositiveInt = 1333
+    """Max long-side after resize (train and val)."""
+    train_min_sizes: list[int] = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
+    """Min-side scale choices for training resize."""
+    val_min_size: PositiveInt = 800
+    """Min-side scale for validation resize."""
+    crop_enabled: bool = True
+    """Enable the random-crop augmentation branch during training."""
+    crop_scales: list[int] = [400, 500, 600]
+    """Min-side scale choices for the resize step before cropping."""
+    crop_min_size: PositiveInt = 384
+    """Minimum crop dimension."""
+    crop_max_size: PositiveInt = 600
+    """Maximum crop dimension."""
+
     # -- Evaluation --------------------------------------------------------------
     eval: bool = False
     """Evaluation-only mode."""
     topk: PositiveInt = 100
     """Top-k predictions for evaluation."""
+    max_dets: list[int] = [1, 10, 100]
+    """maxDets thresholds for COCO evaluation. Must have exactly 3 elements:
+    AR is reported at each value, and AP is computed at the third."""
 
     # -- Training technologies ---------------------------------------------------
     amp_dtype: Literal["fp32", "fp16", "bf16"] = "fp32"
