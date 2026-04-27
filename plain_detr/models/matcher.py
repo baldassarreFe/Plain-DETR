@@ -17,6 +17,7 @@ Modules to compute the matching cost and solve the corresponding LSAP.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 import torch
@@ -57,6 +58,7 @@ class HungarianMatcher(nn.Module):
         self.cost_bbox = cost_bbox
         self.cost_giou = cost_giou
         self.cost_bbox_type = cost_bbox_type
+        self._thread_pool = ThreadPoolExecutor(max_workers=16)
         assert cost_class != 0 or cost_bbox != 0 or cost_giou != 0, "all costs cant be 0"
 
     def forward(self, outputs, targets):
@@ -81,6 +83,7 @@ class HungarianMatcher(nn.Module):
         """
         with torch.no_grad():
             bs, num_queries = outputs["pred_logits"].shape[:2]
+            device = outputs["pred_logits"].device
 
             # We flatten to compute the cost matrices in a batch
             out_prob = outputs["pred_logits"].flatten(0, 1).sigmoid()
@@ -115,12 +118,18 @@ class HungarianMatcher(nn.Module):
             C = self.cost_bbox * cost_bbox + self.cost_class * cost_class + self.cost_giou * cost_giou
             C = C.view(bs, num_queries, -1).cpu()
 
+            # Solve the assignment problem for each batch element in parallel.
+            # linear_sum_assignment is a C extension that releases the GIL.
             sizes = [len(v["boxes"]) for v in targets]
-            indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
+            cost_matrices = [c[i] for i, c in enumerate(C.split(sizes, -1))]
+            indices = list(self._thread_pool.map(linear_sum_assignment, cost_matrices))
+
+            # Return indices on the same device as the model outputs
+            # since they are later used to index tensors on that device
             return [
                 (
-                    torch.as_tensor(i, dtype=torch.int64),
-                    torch.as_tensor(j, dtype=torch.int64),
+                    torch.from_numpy(i).to(device, non_blocking=True),
+                    torch.from_numpy(j).to(device, non_blocking=True),
                 )
                 for i, j in indices
             ]
